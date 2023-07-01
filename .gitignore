@@ -1,2 +1,5 @@
 #Ignore the pip enviroment folder
 env/
+
+#Ignore the dataset folder
+DHP19/
