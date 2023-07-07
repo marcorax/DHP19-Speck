@@ -30,7 +30,9 @@ function [startIndex, stopIndex, ...
     timeStamp = uint32(events(startIndex:stopIndex));
     
     % remove events out of the boundaries.
-    cond = (x<0) | (x>sx-1) | (y_raw<0) | (y_raw>sy-1) | (cam<0) | (cam>nbcam-1);
+    % cond = (x<0) | (x>sx-1) | (y_raw<0) | (y_raw>sy-1) | (cam<0) | (cam>nbcam-1);
+    cond = (x<0) | (x>sx-1) | (y_raw<0) | (y_raw>sy-1) | (cam<2) | (cam>3);
+
     x(cond)=[];
     y_raw(cond)=[];
     pol(cond)=[];

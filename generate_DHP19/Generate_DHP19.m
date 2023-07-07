@@ -11,9 +11,9 @@
 
 % Set the paths of code repository folder, data folder and output folder 
 % where to generate files of accumulated events.
-rootCodeFolder = ''; % root directory of the git repo.
-rootDataFolder = ''; % root directory of the data downloaded from resiliosync.
-outDatasetFolder = '';
+rootCodeFolder = '/home/marcorax93/Repositories/DHP19-Speck/'; % root directory of the git repo.
+rootDataFolder = '/home/marcorax93/Repositories/DHP19-Speck/DHP19/'; % root directory of the data downloaded from resiliosync.
+outDatasetFolder = 'h5/';
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -84,12 +84,14 @@ numConvertedFiles = 0;
 
 % setup output folder
 if ~exist(outputFolder,'dir'), mkdir(outputFolder); end
-cd(outputFolder)
+% cd(outputFolder)
 
 % log files
+% fileID = fopen(sprintf('Fileslog_%s.log', t), 'w');
 fileID = fopen(sprintf('%s/Fileslog_%s.log', log_path, t), 'w');
 
 if save_log_special_events
+    % fileID_specials = fopen(sprintf('SpecialEventsLog_%s.log', t), 'w');
     fileID_specials = fopen(sprintf('%s/SpecialEventsLog_%s.log', log_path, t), 'w');
 end
 

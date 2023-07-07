@@ -3,6 +3,9 @@ env/
 
 #Ignore the dataset folder
 DHP19/
+h5/
 
 #ignore the jupyter checkpoints
 .ipynb_checkpoints/
+
+
