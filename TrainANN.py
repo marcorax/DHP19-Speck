@@ -238,7 +238,28 @@ plt.imshow(np.sum(ybatch[14,:,:,:].cpu().detach().numpy(), 0))
 
 
 plt.figure()
-plt.imshow(images_all[19,:,:].cpu().detach().numpy())
+plt.imshow(images_all[14,:,:].cpu().detach().numpy())
+
+#%% Test Set
+
+output_heatmap = torch.zeros(label_heatmaps_all.size())
+
+for i in range(0, len(images_all), batch_size):
+    Xbatch = images_all[i:i+batch_size]
+    Xbatch = Xbatch[:,None].to('cuda')
+    y_pred = model(Xbatch)
+    output_heatmap[i:i+batch_size] = y_pred
+    
+print(f'Finished epoch {epoch}, latest loss {loss}')
+
+
+#%% Save Results
+torch_save_f = "torch_save/"
+
+torch.save(images_all, torch_save_f+"input_images")
+torch.save(model, torch_save_f+"model")
+torch.save(label_heatmaps_all, torch_save_f+"heat_maps_labels")
+
 
 #%% Original visual
 
