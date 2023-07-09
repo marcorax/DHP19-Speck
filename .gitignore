@@ -4,7 +4,7 @@ env/
 #Ignore the dataset folder
 DHP19/
 h5/
-torch/save
+torch_save/
 
 #ignore the jupyter checkpoints
 .ipynb_checkpoints/

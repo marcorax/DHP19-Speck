@@ -14,6 +14,7 @@ import cv2, torch,torchvision
 import torch.nn as nn
 import torch.optim as optim
 
+#%% H5 Data loader 
 def load_file_(filepath):
     if filepath.endswith('.h5'):
         with h5py.File(filepath, 'r') as f_:
@@ -133,7 +134,7 @@ label_heatmaps_all = torch.cat([label_heatmaps_all[:,0],label_heatmaps_all[:,1]]
 label_heatmaps_all = label_heatmaps_all.permute(0,3,1,2)
 images_all = torch.cat([images_all[:,:,:,0],images_all[:,:,:,1]])
 
-#%% Training the ANN
+#%% Define the ANN
 
 model = nn.Sequential(
     nn.Conv2d(in_channels=1, out_channels=16, padding=(2,2), kernel_size=(5, 5), stride=(2,2)),
@@ -216,6 +217,8 @@ optimizer = optim.RMSprop(model.parameters(), lr=8e-5)
 n_epochs = 1000
 batch_size = 16
 
+
+#%% Train the ANN
 model.to('cuda') 
 
 for epoch in range(n_epochs):
@@ -241,17 +244,26 @@ plt.figure()
 plt.imshow(images_all[14,:,:].cpu().detach().numpy())
 
 #%% Test Set
+# model.to('cuda') 
 
-output_heatmap = torch.zeros(label_heatmaps_all.size())
+output_heatmap = torch.zeros(2688//2,13,256,256)
 
-for i in range(0, len(images_all), batch_size):
+images_all = images_all.cpu()
+model = model.cpu()
+
+for i in range(0, len(images_all)//2, batch_size):
     Xbatch = images_all[i:i+batch_size]
-    Xbatch = Xbatch[:,None].to('cuda')
+    Xbatch = Xbatch[:,None]#.to('cuda')
     y_pred = model(Xbatch)
     output_heatmap[i:i+batch_size] = y_pred
     
-print(f'Finished epoch {epoch}, latest loss {loss}')
+# print(f'Finished, test loss {loss}')
 
+# Plot some results
+plt.figure()
+plt.imshow(np.sum(y_pred[2,:,:,:].cpu().detach().numpy(), 0))
+# plt.figure()
+# plt.imshow(np.sum(ybatch[14,:,:,:].cpu().detach().numpy(), 0))
 
 #%% Save Results
 torch_save_f = "torch_save/"
@@ -259,6 +271,15 @@ torch_save_f = "torch_save/"
 torch.save(images_all, torch_save_f+"input_images")
 torch.save(model, torch_save_f+"model")
 torch.save(label_heatmaps_all, torch_save_f+"heat_maps_labels")
+torch.save(output_heatmap, torch_save_f+"pred_heat_maps")
+
+
+#%% Load the tensors
+torch_save_f = "torch_save/"
+
+images_all = torch.load(torch_save_f+"input_images")
+model = torch.load(torch_save_f+"model")
+# label_heatmaps_all = torch.load(torch_save_f+"heat_maps_labels")
 
 
 #%% Original visual
