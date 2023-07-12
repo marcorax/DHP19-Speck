@@ -14,164 +14,47 @@ import cv2, torch,torchvision
 import torch.nn as nn
 import torch.optim as optim
 
-#%% H5 Data loader 
-def load_file_(filepath):
-    if filepath.endswith('.h5'):
-        with h5py.File(filepath, 'r') as f_:
-            data = (f_[list(f_.keys())[0]])[()]
-    else:
-        raise ValueError('.h5 required format.')
-    return data
-
-def decay_heatmap(heatmap, sigma2=4):
-    heatmap = cv2.GaussianBlur(heatmap,(0,0),sigma2)
-    heatmap /= np.max(heatmap) # to keep the max to 1
-    return heatmap
 
 
-# path of files generated using matlab 
-path_ = 'h5/h5_dataset_7500_events/346x260/'
-# camera projection matrices path
-P_mat_dir = 'DHP19/P_matrices/'
-
-image_h, image_w, num_joints = 260, 346, 13 # depend on how accumulated frames are generated in Matlab
-cut_image_h, cut_image_w, num_joints = 256, 256, 13 # depend on how accumulated frames are generated in Matlab
-cut_x1 = (image_w-cut_image_w)//2
-cut_x2 = cut_x1+cut_image_w
-cut_y1 = (image_h-cut_image_h)//2
-cut_y2 = cut_y1+cut_image_h
-speck_downsample = 1/2
-n_channels=2
-cameras=[2,3]
-
-decay_maps_flag = True # True to blur heatmaps
-P_mat_cam = np.zeros([4,3,4])
-
-
-P_mat_cam[1,:,:] = np.load(join(P_mat_dir,'P1.npy'))
-P_mat_cam[3,:,:] = np.load(join(P_mat_dir,'P2.npy'))
-P_mat_cam[2,:,:] = np.load(join(P_mat_dir,'P3.npy'))
-P_mat_cam[0,:,:] = np.load(join(P_mat_dir,'P4.npy'))
-
-P_mat_cam = P_mat_cam[cameras,:,:]
-
-label_heatmaps_all = []
-images_all = []
-
-
-#12 subject training. test s13-17.
-for subj in range(2,3):
-    # for sess in range(1,6):
-    for sess in range(1,3):
-        for mov in range(1,34):
-            if isfile(join(path_, 'S{}_session{}_mov{}_7500events_label.h5'.format(subj,sess,mov))):
-                vicon_xyz = load_file_(join(path_, 'S{}_session{}_mov{}_7500events_label.h5'.format(subj,sess,mov)))
-                images = load_file_(join(path_, 'S{}_session{}_mov{}_7500events.h5'.format(subj,sess,mov)))
-                images = images[:,cut_y1:cut_y2,cut_x1:cut_x2,cameras]
-                n_t = len(images)
-                
-                # use homogeneous coordinates representation to project 3d XYZ coordinates to 2d UV pixel coordinates.
-                vicon_xyz_homog = np.ones([np.shape(vicon_xyz)[0],np.shape(vicon_xyz)[1]+1,np.shape(vicon_xyz)[2]])
-                vicon_xyz_homog[:,:-1,:] = np.array(vicon_xyz)
-                coord_pix_all_cam2_homog = np.einsum('kij,ljm->lkim',P_mat_cam, vicon_xyz_homog)
-                coord_pix_all_cam2_homog_norm = coord_pix_all_cam2_homog/coord_pix_all_cam2_homog[:,:,[-1],:]
-                u = coord_pix_all_cam2_homog_norm[:,:,0]
-                v = image_h - coord_pix_all_cam2_homog_norm[:,:,1] # flip v coordinate to match the image direction
-                
-                # pixel coordinates
-                u = u.astype(np.int32)
-                v = v.astype(np.int32)
-                                
-                # mask is used to make sure that pixel positions are in frame range.
-                mask = np.ones(u.shape).astype(np.float32)
-                mask[u>=image_w] = 0
-                mask[u<=0] = 0
-                mask[v>=image_h] = 0
-                mask[v<=0] = 0
-                
-                
-                
-                # initialize the heatmaps
-                label_heatmaps = np.zeros((n_t, n_channels, image_h, image_w, num_joints))
-                
-                k = 2 # constant used to better visualize the joints when not using decay
-                
-                for t in range(n_t):
-                    for ch in range(n_channels):
-                        for fmidx,pair in enumerate(zip(v[t,ch],u[t,ch], mask[t,ch])):
-                            if decay_maps_flag:
-                                if pair[2]==1: # write joint position only when projection within frame boundaries
-                                    label_heatmaps[t,ch,pair[0],pair[1], fmidx] = 1
-                                    label_heatmaps[t,ch,:,:,fmidx] = decay_heatmap(label_heatmaps[t,ch,:,:,fmidx])
-                            else:
-                                if pair[2]==1: # write joint position only when projection within frame boundaries
-                                    label_heatmaps[t,ch,(pair[0]-k):(pair[0]+k+1),(pair[1]-k):(pair[1]+k+1), fmidx] = 1
-                 
-                label_heatmaps = label_heatmaps[:,:,cut_y1:cut_y2,cut_x1:cut_x2,:]
-                
-                
-                if subj==2 and sess==4 and mov==6:
-                    plt.figure()
-                    plt.imshow(images[19,:,:,0], cmap='gray')
-                    plt.imshow(np.sum(label_heatmaps[19,0], axis=-1), alpha=.5)
-                    plt.show()
-                                  
-                images = list(images)
-                
-                for t in range(n_t):
-                    images[t] = cv2.resize(images[t],(128,128))
-                
-                images = np.array(images)
-                
-                label_heatmaps_all.append(label_heatmaps)
-                images_all.append(images)
-
-#%% Preparing the tensors
-
-label_heatmaps_all = torch.Tensor(np.concatenate(label_heatmaps_all))
-images_all = torch.Tensor(np.concatenate(images_all))
-label_heatmaps_all = torch.cat([label_heatmaps_all[:,0],label_heatmaps_all[:,1]])
-label_heatmaps_all = label_heatmaps_all.permute(0,3,1,2)
-images_all = torch.cat([images_all[:,:,:,0],images_all[:,:,:,1]])
 
 #%% Define the ANN
 
 model = nn.Sequential(
-    nn.Conv2d(in_channels=1, out_channels=16, padding=(2,2), kernel_size=(5, 5), stride=(2,2)),
+    nn.Conv2d(in_channels=1, out_channels=16, padding=(2,2), kernel_size=(5, 5), stride=(2,2), bias=False),
     nn.LeakyReLU(),
-    nn.Conv2d(in_channels=16, out_channels=32, padding=(2,2), kernel_size=(5, 5), stride=(2,2)),
+    nn.Conv2d(in_channels=16, out_channels=32, padding=(2,2), kernel_size=(5, 5), stride=(2,2), bias=False),
     nn.LeakyReLU(),
-    nn.Conv2d(in_channels=32, out_channels=32, padding=(1,1), kernel_size=(3, 3)),
+    nn.Conv2d(in_channels=32, out_channels=32, padding=(1,1), kernel_size=(3, 3), bias=False),
     nn.LeakyReLU(),
-    nn.Conv2d(in_channels=32, out_channels=32, padding=(1,1), kernel_size=(3, 3)),
+    nn.Conv2d(in_channels=32, out_channels=32, padding=(1,1), kernel_size=(3, 3), bias=False),
     nn.LeakyReLU(),
-    nn.Conv2d(in_channels=32, out_channels=32, padding=(2,2), kernel_size=(5, 5), stride=(2,2)),
+    nn.Conv2d(in_channels=32, out_channels=32, padding=(2,2), kernel_size=(5, 5), stride=(2,2), bias=False),
     nn.LeakyReLU(),
-    nn.Conv2d(in_channels=32, out_channels=64, padding=(1,1), kernel_size=(3, 3)),
+    nn.Conv2d(in_channels=32, out_channels=64, padding=(1,1), kernel_size=(3, 3), bias=False),
     nn.LeakyReLU(),
-    nn.Conv2d(in_channels=64, out_channels=64, padding=(1,1), kernel_size=(3, 3)),
+    nn.Conv2d(in_channels=64, out_channels=64, padding=(1,1), kernel_size=(3, 3), bias=False),
     nn.LeakyReLU(),
-    nn.Conv2d(in_channels=64, out_channels=28, padding=(1,1), kernel_size=(3, 3)),
+    nn.Conv2d(in_channels=64, out_channels=28, padding=(1,1), kernel_size=(3, 3), bias=False),
     nn.LeakyReLU(),
-    nn.Conv2d(in_channels=28, out_channels=28, padding=(1,1), kernel_size=(3, 3)),
+    nn.Conv2d(in_channels=28, out_channels=28, padding=(1,1), kernel_size=(3, 3), bias=False),
     nn.LeakyReLU(),
-    nn.ConvTranspose2d(in_channels=28, out_channels=28, padding=(1,1), kernel_size=(4, 4), stride=(2,2)),
+    nn.ConvTranspose2d(in_channels=28, out_channels=28, padding=(1,1), kernel_size=(4, 4), stride=(2,2), bias=False),
     nn.LeakyReLU(),
-    nn.Conv2d(in_channels=28, out_channels=28, padding=(1,1), kernel_size=(3, 3)),
+    nn.Conv2d(in_channels=28, out_channels=28, padding=(1,1), kernel_size=(3, 3), bias=False),
     nn.LeakyReLU(),
-    nn.ConvTranspose2d(in_channels=28, out_channels=28, padding=(1,1), kernel_size=(4, 4), stride=(2,2)),
+    nn.ConvTranspose2d(in_channels=28, out_channels=28, padding=(1,1), kernel_size=(4, 4), stride=(2,2), bias=False),
     nn.LeakyReLU(),
-    nn.Conv2d(in_channels=28, out_channels=28, padding=(1,1), kernel_size=(3, 3)),
+    nn.Conv2d(in_channels=28, out_channels=28, padding=(1,1), kernel_size=(3, 3), bias=False),
     nn.LeakyReLU(),
-    nn.Conv2d(in_channels=28, out_channels=28, padding=(1,1), kernel_size=(3, 3)),
+    nn.Conv2d(in_channels=28, out_channels=28, padding=(1,1), kernel_size=(3, 3), bias=False),
     nn.LeakyReLU(),
-    nn.ConvTranspose2d(in_channels=28, out_channels=16, padding=(1,1), kernel_size=(4, 4), stride=(2,2)),
+    nn.ConvTranspose2d(in_channels=28, out_channels=16, padding=(1,1), kernel_size=(4, 4), stride=(2,2), bias=False),
     nn.LeakyReLU(),
-    nn.Conv2d(in_channels=16, out_channels=16, padding=(1,1), kernel_size=(3, 3)),
+    nn.Conv2d(in_channels=16, out_channels=16, padding=(1,1), kernel_size=(3, 3), bias=False),
     nn.LeakyReLU(),
-    nn.ConvTranspose2d(in_channels=16, out_channels=16, padding=(1,1), kernel_size=(4, 4), stride=(2,2)),
+    nn.ConvTranspose2d(in_channels=16, out_channels=16, padding=(1,1), kernel_size=(4, 4), stride=(2,2), bias=False),
     nn.LeakyReLU(),
-    nn.Conv2d(in_channels=16, out_channels=13, padding=(1,1), kernel_size=(3, 3)),
+    nn.Conv2d(in_channels=16, out_channels=13, padding=(1,1), kernel_size=(3, 3), bias=False),
     nn.LeakyReLU()
     )
 
@@ -214,14 +97,82 @@ model = nn.Sequential(
 loss_fn = nn.MSELoss()  
 optimizer = optim.RMSprop(model.parameters(), lr=8e-5)
 
-n_epochs = 1000
-batch_size = 16
+n_epochs = 1
+batch_size = 32
 
 
 #%% Train the ANN
 model.to('cuda') 
+torch_save_f = "torch_save/train/"
+
 
 for epoch in range(n_epochs):
+    for subj in range(1,2):
+        images_all=[]
+        label_heatmaps_all=[]
+        for sess in range(1,9):
+            for mov in range(1,34):
+                if isfile(join(torch_save_f,'S{}_session{}_mov{}_7500events_label'.format(subj,sess,mov))):
+                    images = torch.load(torch_save_f+"S{}_session{}_mov{}_7500events".format(subj,sess,mov))
+                    label_heatmaps = torch.load(torch_save_f+"S{}_session{}_mov{}_7500events_label".format(subj,sess,mov))
+                    images_all.append(images)
+                    label_heatmaps_all.append(label_heatmaps)
+        images_all = torch.concat(images_all)
+        label_heatmaps_all = torch.concat(label_heatmaps_all)
+        label_heatmaps_all = torch.cat([label_heatmaps_all[:,0],label_heatmaps_all[:,1]])
+        label_heatmaps_all = label_heatmaps_all.permute(0,3,1,2)
+        images_all = torch.cat([images_all[:,:,:,0],images_all[:,:,:,1]])
+        
+        
+        for i in range(0, len(images_all), batch_size):
+            Xbatch = images_all[i:i+batch_size]
+            Xbatch = Xbatch[:,None].to('cuda')
+            y_pred = model(Xbatch)
+            ybatch = label_heatmaps_all[i:i+batch_size].to('cuda')
+            loss = loss_fn(y_pred, ybatch)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            y_pred_py = y_pred.cpu().detach().numpy()
+            ybatch_py = ybatch.cpu().detach().numpy()
+            images_all_py = images_all[i:i+batch_size].cpu().detach().numpy()
+            
+        del images_all, label_heatmaps_all, Xbatch, y_pred, ybatch
+    print(f'Finished epoch {epoch}, latest loss {loss}')
+    
+# Plot some results
+plt.figure()
+plt.imshow(np.sum(y_pred_py[14,:,:,:], 0))
+plt.figure()
+plt.imshow(np.sum(ybatch_py[14,:,:,:], 0))
+
+
+plt.figure()
+plt.imshow(images_all_py[14,:,:])
+
+#%% Test Set
+# model.to('cuda') 
+
+torch_save_f = "torch_save/test/"
+
+
+for subj in range(13,14):
+    images_all=[] 
+    label_heatmaps_all=[]
+    for sess in range(1,9):
+        for mov in range(1,34):
+            if isfile(join(torch_save_f,'S{}_session{}_mov{}_7500events_label'.format(subj,sess,mov))):
+                images = torch.load(torch_save_f+"S{}_session{}_mov{}_7500events".format(subj,sess,mov))
+                label_heatmaps = torch.load(torch_save_f+"S{}_session{}_mov{}_7500events_label".format(subj,sess,mov))
+                images_all.append(images)
+                label_heatmaps_all.append(label_heatmaps)
+    images_all = torch.concat(images_all)
+    label_heatmaps_all = torch.concat(label_heatmaps_all)
+    label_heatmaps_all = torch.cat([label_heatmaps_all[:,0],label_heatmaps_all[:,1]])
+    label_heatmaps_all = label_heatmaps_all.permute(0,3,1,2)
+    images_all = torch.cat([images_all[:,:,:,0],images_all[:,:,:,1]])
+    
+    
     for i in range(0, len(images_all), batch_size):
         Xbatch = images_all[i:i+batch_size]
         Xbatch = Xbatch[:,None].to('cuda')
@@ -231,54 +182,37 @@ for epoch in range(n_epochs):
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-    print(f'Finished epoch {epoch}, latest loss {loss}')
+        y_pred_py = y_pred.cpu().detach().numpy()
+        ybatch_py = ybatch.cpu().detach().numpy()
+        images_all_py = images_all[i:i+batch_size].cpu().detach().numpy()
+        
+    del images_all, label_heatmaps_all, Xbatch, y_pred, ybatch
+print(f'Finished epoch {epoch}, latest loss {loss}')
     
 # Plot some results
 plt.figure()
-plt.imshow(np.sum(y_pred[14,:,:,:].cpu().detach().numpy(), 0))
+plt.imshow(np.sum(y_pred_py[2,:,:,:], 0))
 plt.figure()
-plt.imshow(np.sum(ybatch[14,:,:,:].cpu().detach().numpy(), 0))
+plt.imshow(np.sum(ybatch_py[2,:,:,:], 0))
 
 
 plt.figure()
-plt.imshow(images_all[14,:,:].cpu().detach().numpy())
-
-#%% Test Set
-# model.to('cuda') 
-
-output_heatmap = torch.zeros(2688//2,13,256,256)
-
-images_all = images_all.cpu()
-model = model.cpu()
-
-for i in range(0, len(images_all)//2, batch_size):
-    Xbatch = images_all[i:i+batch_size]
-    Xbatch = Xbatch[:,None]#.to('cuda')
-    y_pred = model(Xbatch)
-    output_heatmap[i:i+batch_size] = y_pred
-    
-# print(f'Finished, test loss {loss}')
-
-# Plot some results
-plt.figure()
-plt.imshow(np.sum(y_pred[2,:,:,:].cpu().detach().numpy(), 0))
-# plt.figure()
-# plt.imshow(np.sum(ybatch[14,:,:,:].cpu().detach().numpy(), 0))
+plt.imshow(images_all_py[2,:,:])
 
 #%% Save Results
 torch_save_f = "torch_save/"
 
-torch.save(images_all, torch_save_f+"input_images")
-torch.save(model, torch_save_f+"model")
-torch.save(label_heatmaps_all, torch_save_f+"heat_maps_labels")
-torch.save(output_heatmap, torch_save_f+"pred_heat_maps")
+# torch.save(images_all, torch_save_f+"input_images")
+torch.save(model, torch_save_f+"model_100epochs_complete_training")
+# torch.save(label_heatmaps_all, torch_save_f+"heat_maps_labels")
+# torch.save(output_heatmap, torch_save_f+"pred_heat_maps")
 
 
 #%% Load the tensors
 torch_save_f = "torch_save/"
 
-images_all = torch.load(torch_save_f+"input_images")
-model = torch.load(torch_save_f+"model")
+# images_all = torch.load(torch_save_f+"input_images")
+model = torch.load(torch_save_f+"model_100epochs_complete_training")
 # label_heatmaps_all = torch.load(torch_save_f+"heat_maps_labels")
 
 
@@ -348,3 +282,5 @@ plt.figure()
 plt.imshow(image, cmap='gray')
 plt.imshow(np.sum(label_heatmaps, axis=-1), alpha=.5)
 plt.show()
+
+
